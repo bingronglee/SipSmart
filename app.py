@@ -1,223 +1,231 @@
-from flask import Flask, render_template, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, date
-import os
-import logging
-from logging.handlers import RotatingFileHandler
-import sys
+import sqlite3
+import tkinter as tk
+from tkinter import ttk
+from datetime import datetime, time
+import threading
+import time as time_module
 
-# 配置日誌系統
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+class WaterReminderApp:
+    def __init__(self):
+        self.init_database()
+        self.setup_ui()
 
-# 設置日誌檔編碼為UTF-8
-handler = RotatingFileHandler('app.log', maxBytes=10000, backupCount=3, encoding='utf-8')
-handler.setFormatter(logging.Formatter(
-    '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-))
-logger.addHandler(handler)
+    def init_database(self):
+        # 连接到SQLite数据库（如果不存在则创建）
+        self.conn = sqlite3.connect('water_reminder.db')
+        self.cursor = self.conn.cursor()
 
-# 添加控制台處理器並設置編碼
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(logging.Formatter('%(message)s'))
-logger.addHandler(console_handler)
+        # 创建用户设置表
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_settings (
+            id INTEGER PRIMARY KEY,
+            daily_goal INTEGER DEFAULT 2000,
+            reminder_enabled BOOLEAN DEFAULT 1,
+            reminder_interval INTEGER DEFAULT 30,
+            reminder_start TIME DEFAULT '08:00',
+            reminder_end TIME DEFAULT '22:00'
+        )
+        ''')
 
-# 應用配置
-class Config:
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///water_tracker.db'
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
+        # 创建喝水记录表
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS water_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
 
-app = Flask(__name__)
-app.config.from_object(Config)
-db = SQLAlchemy(app)
+        # 初始化用户设置（如果不存在）
+        self.cursor.execute('INSERT OR IGNORE INTO user_settings (id) VALUES (1)')
+        self.conn.commit()
 
-class WaterLog(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    amount = db.Column(db.Integer, nullable=False)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    date = db.Column(db.Date, nullable=False, default=date.today)
+    def setup_ui(self):
+        self.root = tk.Tk()
+        self.root.title('飲水提醒應用')
+        self.root.geometry('800x600')
 
-class Settings(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    daily_goal = db.Column(db.Integer, nullable=False, default=2000)
-    reminder_interval = db.Column(db.Integer, nullable=False, default=60)
-    notifications_enabled = db.Column(db.Boolean, nullable=False, default=True)
-    last_active_date = db.Column(db.Date, nullable=False, default=date.today)
+        # 创建标签页
+        notebook = ttk.Notebook(self.root)
+        notebook.pack(expand=True, fill='both', padx=10, pady=5)
 
-def initialize_database():
-    try:
-        # 只在資料庫不存在時創建
-        if not os.path.exists('water_tracker.db'):
-            db.create_all()
-            logger.info("資料庫表創建成功")
+        # 主页面
+        home_frame = ttk.Frame(notebook)
+        notebook.add(home_frame, text='今日飲水')
+        self.setup_home_page(home_frame)
 
-            # 檢查並創建默認設置
-            if not Settings.query.first():
-                default_settings = Settings(
-                    daily_goal=2000,
-                    reminder_interval=60,
-                    notifications_enabled=True,
-                    last_active_date=date.today()
-                )
-                db.session.add(default_settings)
-                db.session.commit()
-                logger.info("默認設置初始化成功")
-        else:
-            logger.info("資料庫已存在，跳過初始化")
-        return True
-    except Exception as e:
-        logger.error(f"資料庫初始化錯誤: {str(e)}")
-        return False
+        # 设置页面
+        settings_frame = ttk.Frame(notebook)
+        notebook.add(settings_frame, text='設定')
+        self.setup_settings_page(settings_frame)
 
-# 在應用上下文中初始化資料庫
-with app.app_context():
-    if not initialize_database():
-        logger.error("資料庫初始化失敗，應用可能無法正常運行")
-        sys.exit(1)  # 如果資料庫初始化失敗，終止應用
+        # 启动提醒线程
+        self.reminder_thread = threading.Thread(target=self.reminder_loop, daemon=True)
+        self.reminder_thread.start()
 
-def check_and_reset_daily_progress():
-    settings = Settings.query.first()
-    today = date.today()
-    
-    if settings.last_active_date < today:
-        # 更新最後活動日期
-        settings.last_active_date = today
-        db.session.commit()
-        return True
-    return False
+    def setup_home_page(self, parent):
+        # 显示今日进度
+        progress_frame = ttk.LabelFrame(parent, text='今日進度')
+        progress_frame.pack(fill='x', padx=10, pady=5)
 
-@app.route('/')
-def index():
-    settings = Settings.query.first()
-    today = date.today()
-    
-    # 檢查是否需要重置
-    check_and_reset_daily_progress()
-    
-    # 只獲取今天的記錄
-    today_logs = WaterLog.query.filter(
-        db.func.date(WaterLog.timestamp) == today
-    ).all()
-    
-    total_today = sum(log.amount for log in today_logs)
-    percentage = min(int((total_today / settings.daily_goal) * 100), 100)
-    
-    return render_template('index.html',
-                         total_today=total_today,
-                         goal=settings.daily_goal,
-                         percentage=percentage,
-                         settings=settings)
+        self.progress_var = tk.StringVar(value='0%')
+        progress_label = ttk.Label(progress_frame, textvariable=self.progress_var, font=('Helvetica', 24))
+        progress_label.pack(pady=10)
 
-class ValidationError(Exception):
-    pass
+        # 快速添加按钮
+        buttons_frame = ttk.LabelFrame(parent, text='快速添加')
+        buttons_frame.pack(fill='x', padx=10, pady=5)
 
-def validate_water_amount(amount):
-    """驗證飲水量是否合理"""
-    try:
-        amount = int(amount)
-        if amount <= 0 or amount > 5000:  # 假設單次最大飲水量為5000ml
-            raise ValidationError("飲水量必須在1-5000ml之間")
-        return amount
-    except ValueError:
-        raise ValidationError("飲水量必須是有效的數位")
+        amounts = [30, 50, 100]
+        for amount in amounts:
+            btn = ttk.Button(buttons_frame, text=f'{amount}ml',
+                           command=lambda a=amount: self.add_water_record(a))
+            btn.pack(side='left', padx=5, pady=5)
 
-def validate_settings(daily_goal, reminder_interval):
-    """驗證設置參數是否合理"""
-    try:
-        daily_goal = int(daily_goal)
-        reminder_interval = int(reminder_interval)
-        
-        if daily_goal < 500 or daily_goal > 10000:
-            raise ValidationError("每日目標必須在500-10000ml之間")
-        if reminder_interval < 15 or reminder_interval > 240:
-            raise ValidationError("提醒間隔必須在15-240分鐘之間")
-            
-        return daily_goal, reminder_interval
-    except ValueError:
-        raise ValidationError("參數必須是有效的數位")
+        # 显示最近记录
+        records_frame = ttk.LabelFrame(parent, text='最近記錄')
+        records_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-@app.errorhandler(ValidationError)
-def handle_validation_error(error):
-    return jsonify({'error': str(error)}), 400
+        self.records_tree = ttk.Treeview(records_frame, columns=('time', 'amount'), show='headings')
+        self.records_tree.heading('time', text='時間')
+        self.records_tree.heading('amount', text='數量 (ml)')
+        self.records_tree.pack(fill='both', expand=True)
 
-@app.errorhandler(500)
-def handle_server_error(error):
-    logger.error(f"伺服器錯誤: {str(error)}")
-    return jsonify({'error': '伺服器內部錯誤'}), 500
+        self.update_home_page()
 
-@app.route('/add_water', methods=['POST'])
-def add_water():
-    try:
-        amount = request.json.get('amount')
-        amount = validate_water_amount(amount)
-        
-        check_and_reset_daily_progress()
-        
-        log = WaterLog(amount=amount, date=date.today())
-        db.session.add(log)
-        db.session.commit()
-        
-        today = date.today()
-        total_today = WaterLog.query.filter(
-            db.func.date(WaterLog.timestamp) == today
-        ).with_entities(db.func.sum(WaterLog.amount)).scalar() or 0
-        
-        settings = Settings.query.first()
-        percentage = (total_today / settings.daily_goal) * 100 if settings else 0
-        
-        return jsonify({
-            'success': True,
-            'total_today': total_today,
-            'percentage': percentage
-        })
-    except ValidationError as e:
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        logger.error(f"添加飲水記錄時出錯: {str(e)}")
-        return jsonify({'error': '伺服器內部錯誤'}), 500
+    def setup_settings_page(self, parent):
+        # 每日目标设置
+        goal_frame = ttk.LabelFrame(parent, text='每日目標')
+        goal_frame.pack(fill='x', padx=10, pady=5)
 
-@app.route('/update_settings', methods=['POST'])
-def update_settings():
-    try:
-        data = request.json
-        daily_goal = data.get('daily_goal')
-        reminder_interval = data.get('reminder_interval')
-        notifications_enabled = data.get('notifications_enabled', True)
-        
-        daily_goal, reminder_interval = validate_settings(daily_goal, reminder_interval)
-        
-        settings = Settings.query.first()
-        if not settings:
-            settings = Settings()
-            db.session.add(settings)
-        
-        settings.daily_goal = daily_goal
-        settings.reminder_interval = reminder_interval
-        settings.notifications_enabled = notifications_enabled
-        
-        db.session.commit()
-        logger.info(f"設置更新成功: 目標={daily_goal}ml, 間隔={reminder_interval}分鐘")
-        
-        return jsonify({'success': True})
-    except ValidationError as e:
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        logger.error(f"更新設置時出錯: {str(e)}")
-        return jsonify({'error': '伺服器內部錯誤'}), 500
+        self.goal_var = tk.StringVar()
+        goal_entry = ttk.Entry(goal_frame, textvariable=self.goal_var)
+        goal_entry.pack(side='left', padx=5, pady=5)
+        ttk.Label(goal_frame, text='ml').pack(side='left')
 
-@app.route('/get_history')
-def get_history():
-    # 檢查是否需要重置
-    check_and_reset_daily_progress()
-    
-    # 獲取最近的記錄，按日期分組
-    logs = WaterLog.query.order_by(WaterLog.timestamp.desc()).limit(10).all()
-    history = [{
-        'time': log.timestamp.strftime('%Y-%m-%d %H:%M'),
-        'amount': log.amount,
-        'date': log.timestamp.strftime('%Y-%m-%d')
-    } for log in logs]
-    return jsonify(history)
+        # 提醒设置
+        reminder_frame = ttk.LabelFrame(parent, text='提醒設定')
+        reminder_frame.pack(fill='x', padx=10, pady=5)
+
+        self.reminder_enabled = tk.BooleanVar()
+        ttk.Checkbutton(reminder_frame, text='啟用提醒',
+                       variable=self.reminder_enabled).pack(pady=5)
+
+        interval_frame = ttk.Frame(reminder_frame)
+        interval_frame.pack(fill='x', pady=5)
+        ttk.Label(interval_frame, text='提醒間隔：').pack(side='left')
+        self.interval_var = tk.StringVar()
+        ttk.Entry(interval_frame, textvariable=self.interval_var,
+                  width=10).pack(side='left')
+        ttk.Label(interval_frame, text='分鐘').pack(side='left')
+
+        # 保存按钮
+        ttk.Button(parent, text='儲存設定',
+                   command=self.save_settings).pack(pady=10)
+
+        # 加载当前设置
+        self.load_settings()
+
+    def add_water_record(self, amount):
+        self.cursor.execute('INSERT INTO water_records (amount) VALUES (?)', (amount,))
+        self.conn.commit()
+        self.update_home_page()
+
+    def add_custom_amount(self):
+        try:
+            amount = int(self.custom_amount.get())
+            if amount > 0:
+                self.add_water_record(amount)
+                self.custom_amount.delete(0, tk.END)
+        except ValueError:
+            pass
+
+    def update_home_page(self):
+        # 获取今日记录
+        today = datetime.now().strftime('%Y-%m-%d')
+        self.cursor.execute('''
+        SELECT SUM(amount) FROM water_records
+        WHERE date(timestamp) = date(?)
+        ''', (today,))
+        total = self.cursor.fetchone()[0] or 0
+
+        # 获取目标
+        self.cursor.execute('SELECT daily_goal FROM user_settings WHERE id = 1')
+        goal = self.cursor.fetchone()[0]
+
+        # 更新进度
+        progress = min(100, int(total * 100 / goal))
+        self.progress_var.set(f'{progress}% ({total}/{goal}ml)')
+
+        # 更新记录列表
+        for item in self.records_tree.get_children():
+            self.records_tree.delete(item)
+
+        self.cursor.execute('''
+        SELECT timestamp, amount FROM water_records
+        WHERE date(timestamp) = date(?)
+        ORDER BY timestamp DESC
+        ''', (today,))
+
+        for record in self.cursor.fetchall():
+            time_str = datetime.strptime(record[0], '%Y-%m-%d %H:%M:%S').strftime('%H:%M')
+            self.records_tree.insert('', 'end', values=(time_str, f'{record[1]}ml'))
+
+    def load_settings(self):
+        self.cursor.execute('''
+        SELECT daily_goal, reminder_enabled, reminder_interval
+        FROM user_settings WHERE id = 1
+        ''')
+        settings = self.cursor.fetchone()
+        if settings:
+            self.goal_var.set(str(settings[0]))
+            self.reminder_enabled.set(bool(settings[1]))
+            self.interval_var.set(str(settings[2]))
+
+    def save_settings(self):
+        try:
+            goal = int(self.goal_var.get())
+            interval = int(self.interval_var.get())
+            if goal > 0 and interval > 0:
+                self.cursor.execute('''
+                UPDATE user_settings
+                SET daily_goal = ?, reminder_enabled = ?, reminder_interval = ?
+                WHERE id = 1
+                ''', (goal, self.reminder_enabled.get(), interval))
+                self.conn.commit()
+                self.update_home_page()
+        except ValueError:
+            pass
+
+    def reminder_loop(self):
+        while True:
+            self.cursor.execute('''
+            SELECT reminder_enabled, reminder_interval
+            FROM user_settings WHERE id = 1
+            ''')
+            settings = self.cursor.fetchone()
+            if settings and settings[0]:  # 如果启用了提醒
+                # 检查是否需要提醒
+                current_time = datetime.now().time()
+                if time(8, 0) <= current_time <= time(22, 0):
+                    self.show_reminder()
+                time_module.sleep(settings[1] * 60)  # 等待设定的间隔时间
+            else:
+                time_module.sleep(60)  # 如果禁用了提醒，每分钟检查一次设置变化
+
+    def show_reminder(self):
+        reminder_window = tk.Toplevel(self.root)
+        reminder_window.title('飲水提醒')
+        reminder_window.geometry('300x150')
+
+        ttk.Label(reminder_window, text='該喝水啦！',
+                  font=('Helvetica', 16)).pack(pady=20)
+        ttk.Button(reminder_window, text='好的',
+                   command=reminder_window.destroy).pack()
+
+    def run(self):
+        self.root.mainloop()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app = WaterReminderApp()
+    app.run()
