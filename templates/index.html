@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <title>喝水提醒 App</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+    <style>
+        :root {
+            --safe-area-inset-top: env(safe-area-inset-top);
+            --safe-area-inset-bottom: env(safe-area-inset-bottom);
+            --safe-area-inset-left: env(safe-area-inset-left);
+            --safe-area-inset-right: env(safe-area-inset-right);
+            --primary-color: #80deea;
+            --secondary-color: #4dd0e1;
+            --background-color: #f7f7f7;
+            --device-height: 852px;
+            --device-width: 393px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background-color: var(--background-color);
+            color: #333;
+            padding-top: calc(48px + var(--safe-area-inset-top));
+            padding-bottom: calc(80px + var(--safe-area-inset-bottom));
+            padding-left: var(--safe-area-inset-left);
+            padding-right: var(--safe-area-inset-right);
+            min-height: var(--device-height);
+            width: 100%;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            width: 100%;
+            max-width: var(--device-width);
+            margin: 0 auto;
+            background: white;
+            min-height: calc(var(--device-height) - var(--safe-area-inset-top) - var(--safe-area-inset-bottom));
+            position: relative;
+        }
+
+        .screen {
+            padding: 20px;
+            padding-bottom: calc(20px + var(--safe-area-inset-bottom));
+            display: none;
+            animation: fadeIn 0.3s ease;
+            min-height: calc(var(--device-height) - 150px);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        .screen-title {
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 30px;
+            font-weight: 600;
+        }
+
+        .progress-circle {
+            width: min(200px, calc(var(--device-width) * 0.5));
+            height: min(200px, calc(var(--device-width) * 0.5));
+            margin: min(30px, calc(var(--device-height) * 0.035)) auto;
+            position: relative;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: conic-gradient(var(--primary-color) 0% {{ percentage }}%, #e0f7fa {{ percentage }}% 100%);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .progress-circle::before {
+            content: '';
+            position: absolute;
+            width: calc(100% - 20px);
+            height: calc(100% - 20px);
+            background: white;
+            border-radius: 50%;
+        }
+
+        .progress-text {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+        }
+
+        .progress-text h2 {
+            font-size: 48px;
+            color: var(--primary-color);
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+
+        .progress-text p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .next-reminder {
+            text-align: center;
+            color: #666;
+            margin: 20px 0;
+            font-size: 15px;
+            padding: 12px;
+            background: rgba(128, 222, 234, 0.1);
+            border-radius: 12px;
+        }
+
+        .water-log-options {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: min(15px, calc(var(--device-width) * 0.038));
+            margin: min(25px, calc(var(--device-height) * 0.029)) 0;
+            padding: 0 min(10px, calc(var(--device-width) * 0.025));
+        }
+
+        .water-log-options button {
+            padding: min(20px, calc(var(--device-height) * 0.023)) min(10px, calc(var(--device-width) * 0.025));
+            font-size: min(18px, calc(var(--device-width) * 0.046));
+            border: none;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #f5fcfd, #e0f7fa);
+            color: var(--secondary-color);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .water-log-options button:active {
+            transform: scale(0.95);
+        }
+
+        .water-log-options button i {
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: var(--secondary-color);
+        }
+
+        .input-group {
+            margin: min(25px, calc(var(--device-height) * 0.029)) min(20px, calc(var(--device-width) * 0.051));
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 10px;
+            color: #666;
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: min(15px, calc(var(--device-height) * 0.018));
+            border: 1.5px solid #e0f7fa;
+            border-radius: 12px;
+            font-size: min(16px, calc(var(--device-width) * 0.041));
+            background: #f8f8f8;
+            transition: all 0.3s ease;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background: white;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: min(16px, calc(var(--device-height) * 0.019)) min(24px, calc(var(--device-width) * 0.061));
+            font-size: min(16px, calc(var(--device-width) * 0.041));
+            font-weight: 600;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 0 min(20px, calc(var(--device-width) * 0.051));
+            width: calc(100% - 40px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            box-shadow: 0 4px 15px rgba(77, 208, 225, 0.3);
+        }
+
+        .btn-primary:active {
+            transform: scale(0.98);
+            box-shadow: 0 2px 8px rgba(77, 208, 225, 0.2);
+        }
+
+        .navigation {
+            background-color: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(0,0,0,0.1);
+            padding: min(20px, calc(var(--device-height) * 0.023));
+            padding-bottom: calc(min(20px, calc(var(--device-height) * 0.023)) + var(--safe-area-inset-bottom));
+            display: flex;
+            justify-content: space-around;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+        }
+
+        .nav-icon {
+            font-size: min(26px, calc(var(--device-width) * 0.066));
+            color: #999;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            padding: min(8px, calc(var(--device-height) * 0.009)) min(20px, calc(var(--device-width) * 0.051));
+            border-radius: 12px;
+        }
+
+        .nav-icon.active {
+            color: var(--primary-color);
+            background: rgba(128, 222, 234, 0.1);
+        }
+
+        #notification {
+            position: fixed;
+            top: calc(20px + var(--safe-area-inset-top));
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            display: none;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+            font-weight: 500;
+        }
+
+        .settings-group {
+            margin: 20px;
+            background: #f8f8f8;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .settings-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: white;
+            margin-bottom: 1px;
+        }
+
+        .settings-item label {
+            font-size: 16px;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .settings-item input[type="number"] {
+            width: 120px;
+            padding: 12px;
+            border: 1.5px solid #e0f7fa;
+            border-radius: 10px;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            margin: 30px 20px;
+        }
+
+        .action-buttons .btn {
+            margin: 0;
+            flex: 1;
+        }
+
+        @supports (padding: max(0px)) {
+            .container {
+                padding-left: max(20px, var(--safe-area-inset-left));
+                padding-right: max(20px, var(--safe-area-inset-right));
+            }
+        }
+
+        @media (min-height: 852px) {
+            .container {
+                height: var(--device-height);
+            }
+        }
+
+        @media (max-height: 852px) {
+            .progress-circle {
+                width: min(180px, calc(var(--device-width) * 0.45));
+                height: min(180px, calc(var(--device-width) * 0.45));
+                margin: 20px auto;
+            }
+
+            .screen-title {
+                margin-bottom: 20px;
+            }
+
+            .water-log-options {
+                margin: 15px 0;
+            }
+
+            .input-group {
+                margin: 15px 20px;
+            }
+        }
+
+        @media (-webkit-device-pixel-ratio: 3) {
+            * {
+                -webkit-font-smoothing: subpixel-antialiased;
+            }
+        }
+
+        /* 添加動畫相關樣式 */
+        @keyframes celebrate {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .celebrate {
+            animation: celebrate 0.5s ease;
+        }
+
+        .achievement-notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            text-align: center;
+            z-index: 1001;
+            display: none;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        .achievement-notification h3 {
+            color: var(--primary-color);
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .achievement-notification p {
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .achievement-icon {
+            font-size: 48px;
+            color: #FFD700;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div id="notification"></div>
+    <div id="achievement" class="achievement-notification">
+        <div class="achievement-icon">🏆</div>
+        <h3>太棒了！</h3>
+        <p>您已達成今日喝水目標！</p>
+    </div>
+    <div class="container">
+        <!-- 主介面 -->
+        <div class="screen active" id="dashboard-screen">
+            <h2 class="screen-title">今日喝水目標</h2>
+            <div class="progress-circle">
+                <div class="progress-text">
+                    <h2>{{ percentage }}%</h2>
+                    <p>{{ total_today }}ml / {{ goal }}ml</p>
+                </div>
+            </div>
+            
+            <p class="next-reminder">下次提醒：計算中...</p>
+
+            <div class="water-log-options">
+                <button onclick="logWater(30)">
+                    <i class="fas fa-glass-water"></i>
+                    30ml
+                </button>
+                <button onclick="logWater(50)">
+                    <i class="fas fa-glass-water"></i>
+                    50ml
+                </button>
+                <button onclick="logWater(100)">
+                    <i class="fas fa-glass-water"></i>
+                    100ml
+                </button>
+            </div>
+
+            <div class="input-group">
+                <label>自訂喝水量 (ml)</label>
+                <input type="number" id="custom-amount" placeholder="請輸入毫升數">
+            </div>
+
+            <!-- 添加水量按鈕 -->
+            <button class="btn btn-primary" onclick="logCustomAmount()">
+                <i class="fas fa-plus"></i>添加紀錄
+            </button>
+        </div>
+
+        <!-- 歷史記錄介面 -->
+        <div class="screen" id="history-screen">
+            <h2 class="screen-title">喝水記錄</h2>
+            <ul class="history-list" id="history-list">
+                <!-- 歷史記錄將通過JavaScript動態添加 -->
+            </ul>
+        </div>
+
+        <!-- 設定介面 -->
+        <div class="screen" id="settings-screen">
+            <h2 class="screen-title">設置</h2>
+            <div class="settings-group">
+                <div class="settings-item">
+                    <label>喝水提醒</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notifications-toggle" {% if settings.notifications_enabled %}checked{% endif %}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="settings-item">
+                    <label>提醒頻率（分鐘）</label>
+                    <input type="number" id="reminder-interval" value="{{ settings.reminder_interval }}" style="width: 100px">
+                </div>
+                <div class="settings-item">
+                    <label>每日目標 (ml)</label>
+                    <input type="number" id="daily-goal" value="{{ settings.daily_goal }}" style="width: 100px">
+                </div>
+                <!-- 保存設置按鈕 -->
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" onclick="cancelSettings()">
+                        <i class="fas fa-times"></i>取消
+                    </button>
+                    <button class="btn btn-primary" onclick="saveSettings()">
+                        <i class="fas fa-check"></i>保存設置
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 導航欄 -->
+        <div class="navigation">
+            <i class="fas fa-home nav-icon active" onclick="showScreen('dashboard-screen')"></i>
+            <i class="fas fa-history nav-icon" onclick="showScreen('history-screen')"></i>
+            <i class="fas fa-cog nav-icon" onclick="showScreen('settings-screen')"></i>
+        </div>
+    </div>
+
+    <audio id="achievementSound" preload="auto">
+        <source src="https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(screen => {
+                screen.classList.remove('active');
+            });
+            document.getElementById(screenId).classList.add('active');
+
+            document.querySelectorAll('.nav-icon').forEach(icon => {
+                icon.classList.remove('active');
+            });
+            document.querySelector(`.nav-icon[onclick*="${screenId}"]`).classList.add('active');
+
+            if (screenId === 'history-screen') {
+                loadHistory();
+            }
+        }
+
+        function showNotification(message) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+
+        function logWater(amount) {
+            fetch('/log_water', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ amount: amount })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    if (data.reset) {
+                        showNotification('新的一天開始了！重新計算喝水量。');
+                    }
+                    updateProgress(data.total, data.percentage);
+                    showNotification(`成功記錄 ${amount}ml 水量！`);
+                }
+            });
+        }
+
+        function logCustomAmount() {
+            const amount = parseInt(document.getElementById('custom-amount').value);
+            if (amount > 0) {
+                logWater(amount);
+                document.getElementById('custom-amount').value = '';
+            } else {
+                showNotification('請輸入有效的水量！');
+            }
+        }
+
+        function updateProgress(total, percentage) {
+            const progressCircle = document.querySelector('.progress-circle');
+            const progressText = document.querySelector('.progress-text h2');
+            const progressDetails = document.querySelector('.progress-text p');
+            
+            progressCircle.style.background = `conic-gradient(#80deea 0% ${percentage}%, #e0f7fa ${percentage}% 100%)`;
+            progressText.textContent = `${percentage}%`;
+            progressDetails.textContent = `${total}ml / {{ goal }}ml`;
+
+            // 檢查是否達成目標
+            if (percentage >= 100) {
+                showAchievement();
+            }
+        }
+
+        function loadHistory() {
+            fetch('/get_history')
+                .then(response => response.json())
+                .then(data => {
+                    const historyList = document.getElementById('history-list');
+                    historyList.innerHTML = '';
+                    data.forEach(log => {
+                        const item = document.createElement('li');
+                        item.className = 'history-item';
+                        item.innerHTML = `
+                            <span>${log.time}</span>
+                            <span>${log.amount}ml</span>
+                        `;
+                        historyList.appendChild(item);
+                    });
+                });
+        }
+
+        function saveSettings() {
+            const settings = {
+                daily_goal: parseInt(document.getElementById('daily-goal').value),
+                reminder_interval: parseInt(document.getElementById('reminder-interval').value),
+                notifications_enabled: document.getElementById('notifications-toggle').checked
+            };
+
+            fetch('/update_settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(settings)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('設置已保存！');
+                    showScreen('dashboard-screen');
+                }
+            });
+        }
+
+        // 更新下次提醒時間
+        function updateNextReminder() {
+            const now = new Date();
+            const nextReminder = new Date(now.getTime() + {{ settings.reminder_interval }} * 60000);
+            const timeString = nextReminder.toLocaleTimeString('zh-TW', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+            document.querySelector('.next-reminder').textContent = `下次提醒：${timeString}`;
+        }
+
+        // 初始化提醒
+        updateNextReminder();
+        setInterval(updateNextReminder, 60000);
+
+        // 如果啟用了通知，每隔設定的時間發送提醒
+        {% if settings.notifications_enabled %}
+        setInterval(() => {
+            showNotification('該喝水了！');
+        }, {{ settings.reminder_interval }} * 60000);
+        {% endif %}
+
+        function showAchievement() {
+            const achievement = document.getElementById('achievement');
+            achievement.style.display = 'block';
+            
+            // 播放音效
+            const sound = document.getElementById('achievementSound');
+            sound.play().catch(e => console.log('無法播放音效:', e));
+            
+            // 觸發彩花效果
+            confetti({
+                particleCount: 100,
+                spread: 70,
+                origin: { y: 0.6 }
+            });
+
+            // 添加圓圈動畫
+            const progressCircle = document.querySelector('.progress-circle');
+            progressCircle.classList.add('celebrate');
+
+            // 3秒後隱藏成就通知
+            setTimeout(() => {
+                achievement.style.display = 'none';
+                progressCircle.classList.remove('celebrate');
+            }, 3000);
+        }
+
+        // 添加定時檢查日期變更
+        function checkDateChange() {
+            const now = new Date();
+            const currentDate = now.toLocaleDateString();
+            
+            if (window.lastCheckedDate && window.lastCheckedDate !== currentDate) {
+                // 日期已變更，重新載入頁面
+                location.reload();
+            }
+            
+            window.lastCheckedDate = currentDate;
+        }
+
+        // 每分鐘檢查一次日期變更
+        setInterval(checkDateChange, 60000);
+
+        // 初始化最後檢查日期
+        window.lastCheckedDate = new Date().toLocaleDateString();
+    </script>
+</body>
+</html> 
